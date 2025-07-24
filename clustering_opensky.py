@@ -13,7 +13,7 @@ from sklearn.preprocessing import StandardScaler
 from scipy.spatial.distance import pdist, squareform
 
 # %%
-idd = "DN"
+idd = "N"
 if idd == "DN":
     t = Traffic(
         pd.read_parquet(
@@ -56,17 +56,7 @@ for cluster in range(n_clusters):
 
     current_cluster = t_dbscan.query(f"cluster == {cluster}")
     ids = list(f.flight_id for f in current_cluster)
-    indexx = ids[
-        squareform(
-            pdist(
-                np.stack(
-                    list(f.data[["x", "y"]].values.ravel() for f in current_cluster)
-                )
-            )
-        )
-        .mean(axis=1)
-        .argmin()
-    ]  # Not sure about this centroid search, "copied" and adapted from traffic's git repo
+    indexx = current_cluster.centroid(40).flight_id  # Not sure about this centroid search, "copied" and adapted from traffic's git repo
     saved_indices.append(indexx)
 # %%
 
@@ -78,7 +68,7 @@ colors = colors[range(1, 148, 5)]
 
 for inx in saved_indices:
     fig, ((ax0, ax1), (ax2, ax3)) = plt.subplots(2, 2, figsize=(6, 6))
-    df = t_dbscan[str(inx)].data
+    df = t_dbscan[inx].data
     for f in t_dbscan.query(f"cluster=={df.cluster.values[0]}"):
         ax0.plot(
             f.data.longitude,
@@ -247,17 +237,7 @@ for cluster in range(n_clusters):
 
     current_cluster = t_dbscan_1.query(f"cluster == {cluster}")
     ids = list(f.flight_id for f in current_cluster)
-    indexx = ids[
-        squareform(
-            pdist(
-                np.stack(
-                    list(f.data[["x", "y"]].values.ravel() for f in current_cluster)
-                )
-            )
-        )
-        .mean(axis=1)
-        .argmin()
-    ]  # Not sure about this centroid search, "copied" and adapted from traffic's git repo
+    indexx = current_cluster.centroid(40).flight_id  # Not sure about this centroid search, "copied" and adapted from traffic's git repo
     saved_indices.append(indexx)
 # %%
 
@@ -269,7 +249,7 @@ colors = colors[range(1, 148, 5)]
 
 for inx in saved_indices:
     fig, ((ax0, ax1), (ax2, ax3)) = plt.subplots(2, 2, figsize=(6, 6))
-    df = t_dbscan_1[str(inx)].data
+    df = t_dbscan_1[inx].data
     for f in t_dbscan_1.query(f"cluster=={df.cluster.values[0]}"):
         ax0.plot(
             f.data.longitude,
@@ -435,7 +415,7 @@ ends = pd.DataFrame(
 ends.to_csv(f"data_generated/opensky_centroid_ends_{idd}.csv", index=False)
 t_cnts.to_parquet(f"data_generated/opensky2024_centroids_{idd}.parquet", index=False)
 t_dbscan_1.to_parquet(
-    f"data_generated/opensky2024_clustererd_flights_{idd}.parquet", index=False
+    f"data_generated/opensky2024_clustered_flights_{idd}.parquet", index=False
 )
 # %%
 colors = list(mcolors.TABLEAU_COLORS.keys())

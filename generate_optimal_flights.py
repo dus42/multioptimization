@@ -2,32 +2,39 @@
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+import casadi
 from openap.casadi import aero as aero_casadi
 from openap import aero, nav, top, prop
 from tqdm import tqdm
 from traffic.data import navaids, airports
 pd.set_option("display.max_rows",15)
+import openap
+import time 
 # %%
 def obj_pop_exposure_day(x, u, dt, **kwargs):
     xp, yp, h, m, ts = x[0], x[1], x[2], x[3], x[4]
     mach, vs, psi = u[0], u[1], u[2]
     tas = aero_casadi.mach2tas(mach, h)
-    thrust = optimizer.drag.clean(m, tas, h / aero.ft, vs / aero.fpm)
-    cost = optimizer.obj_grid_cost(x, u, dt, n_dim=3, time_dependent=True, **kwargs)
+    D = optimizer.drag.clean(m, tas, h / aero.ft, vs / aero.fpm)
+    gamma = np.arctan2(vs, tas)
+    thrust = D + m * 9.81 * casadi.sin(gamma)
+    cost = optimizer.obj_grid_cost(x, u, dt, n_dim=3, time_dependent=False, **kwargs)
     fuel = optimizer.obj_fuel(x, u, dt, **kwargs)
-    return 0.001*cost * thrust + fuel
+    return  0.00025*cost*thrust*dt+fuel
 
 def obj_pop_exposure_night(x, u, dt, **kwargs):
     xp, yp, h, m, ts = x[0], x[1], x[2], x[3], x[4]
     mach, vs, psi = u[0], u[1], u[2]
     tas = aero_casadi.mach2tas(mach, h)
-    thrust = optimizer.drag.clean(m, tas, h / aero.ft, vs / aero.fpm)
-    cost = optimizer.obj_grid_cost(x, u, dt, n_dim=3, time_dependent=True, **kwargs)
+    D = optimizer.drag.clean(m, tas, h / aero.ft, vs / aero.fpm)
+    gamma = np.arctan2(vs, tas)
+    thrust = D + m * 9.81 * casadi.sin(gamma)
+    cost = optimizer.obj_grid_cost(x, u, dt, n_dim=3, time_dependent=False, **kwargs)
     fuel = optimizer.obj_fuel(x, u, dt, **kwargs)
-    return 0.008 * cost * thrust + fuel
+    return  0.00035*cost*thrust*dt+fuel
     
 #%%
-map_type = "DN"
+map_type = "N"
 eham = nav.airport("EHAM")
 actype = "a320"
 start = (eham["lat"], eham["lon"])
@@ -37,49 +44,96 @@ df_cost = pd.read_csv(f"data_generated/df_cost_{map_type}.csv")
 
 flights0 = None
 flights = None
+# xx=2
+# for i in tqdm(c_ends.index[xx:xx+1]):
 for i in tqdm(c_ends.index[:]):
     fid = c_ends.fid.values[i]
-    start = "EHAM"
-    m0 = c_ends.tow.values[i] / prop.aircraft(actype)["mtow"]
-    end = (c_ends.latitude.values[i], c_ends.longitude.values[i])
-    h_end=c_ends.altitude.values[i] * aero.ft
+
 
     #for now the runways are not used
-    rwy = None  #airports["EHAM"].runways.data.query(f"name=='{c_ends.runway.values[i]}'")
+    rwy = airports["EHAM"].runways.data.query(f"name=='{c_ends.runway.values[i]}'")
     if rwy is None or len(rwy)==0:
         trk_start = None
+        start = "EHAM"
     else:
         trk_start=rwy.bearing.values[0]
-
+        start = (rwy.latitude.values[0],rwy.longitude.values[0])
+    
+    m0 = c_ends.tow.values[i] / prop.aircraft(actype)["mtow"]
+    if m0 >0.95:
+        m0 =0.99*m0
+    end = (c_ends.latitude.values[i], c_ends.longitude.values[i])
+    h_end=c_ends.altitude.values[i] * aero.ft
     # generate fuel optimal trajectory
     optimizer = top.Climb(actype, start, end, m0=m0)
-    optimizer.setup(nodes=nodes, max_iteration=1000)
+    optimizer.setup(nodes=nodes, max_iteration=3000, debug=False)
     flight_fuel = optimizer.trajectory(
         objective="fuel",
         h_end=h_end,
-        trk_start=trk_start,
-    ).assign(fid=fid)
-
+        runway_dir=trk_start,
+    )
+    if flight_fuel is None:
+        m0 =0.99*m0
+        optimizer = top.Climb(actype, start, end, m0=m0)
+        optimizer.setup(nodes=nodes, max_iteration=5000, debug=False)
+        flight_fuel = optimizer.trajectory(
+            objective="fuel",
+            h_end=h_end,
+            runway_dir=trk_start,
+        )
+    if flight_fuel is None:
+        print(i, fid, "fuel optimization failed")
+        continue
+    flight_fuel = flight_fuel.assign(fid=fid)
+    drag = openap.Drag("a320", wave_drag=True)
+    D = drag.clean(
+        mass=flight_fuel.mass, 
+        tas=flight_fuel.tas, 
+        alt=flight_fuel.altitude, 
+        vs=flight_fuel.vertical_rate, 
+        )
+    gamma = np.arctan2(flight_fuel.vertical_rate * openap.aero.fpm, flight_fuel.tas * openap.aero.kts)
+    flight_fuel = flight_fuel.assign(thrust = D + flight_fuel.mass * 9.81 * np.sin(gamma))
     # generate optimalpopulation exposure trajectory
     optimizer = top.Climb(actype, start, end, m0=m0)
-    optimizer.setup(nodes=nodes, max_iteration=1000)
-
+    optimizer.setup(nodes=nodes, max_iteration=5000, debug=False)
+    # stime = time.time()
     interpolant = top.tools.interpolant_from_dataframe(df_cost)
     if map_type == "N":
         flight_pop = optimizer.trajectory(
             objective=obj_pop_exposure_night,
             interpolant=interpolant,
             h_end=h_end,
-            trk_start=trk_start,
-        ).assign(fid=fid)
+            runway_dir=trk_start,
+            # max_fuel=(flight_fuel.mass.values[0]-flight_fuel.mass.values[-1])*1.02,
+            initial_guess=flight_fuel,
+        )
+        
     else:
         flight_pop = optimizer.trajectory(
             objective=obj_pop_exposure_day,
             interpolant=interpolant,
             h_end=h_end,
-            trk_start=trk_start,
-        ).assign(fid=fid)
-
+            runway_dir=trk_start,
+            # max_fuel=(flight_fuel.mass.values[0]-flight_fuel.mass.values[-1])*1.015,
+            initial_guess=flight_fuel,
+        )
+    # etime = time.time()
+    # print(i, fid, "time:",{round(etime - stime)}, "s")
+    if flight_pop is None:
+        print(i, fid, "noise optimization failed")
+        continue
+    flight_pop=flight_pop.assign(fid=fid)
+    
+    drag = openap.Drag("a320", wave_drag=True)
+    D = drag.clean(
+        mass=flight_pop.mass, 
+        tas=flight_pop.tas, 
+        alt=flight_pop.altitude, 
+        vs=flight_pop.vertical_rate, 
+        )
+    gamma = np.arctan2(flight_pop.vertical_rate * openap.aero.fpm, flight_pop.tas * openap.aero.kts)
+    flight_pop = flight_pop.assign(thrust = D + flight_pop.mass * 9.81 * np.sin(gamma))
     # calculate cost from grid cost
     cost = interpolant(
         np.array([flight_pop.longitude.values, flight_pop.latitude.values, flight_pop.h.values])
@@ -107,12 +161,16 @@ import matplotlib.colors as mcolors
 # map_type = "DN"
 colors = list(mcolors.TABLEAU_COLORS.keys())
 colors.extend(["b", "g", "y", "m", "c"])
-flights = pd.read_csv(f"data_generated/flights_noise_opt_{map_type}.csv")
-flights0 = pd.read_csv(f"data_generated/flights_fuel_opt_{map_type}.csv")
+# flights = pd.read_csv(f"data_generated/flights_noise_opt_{map_type}.csv")
+# flights0 = pd.read_csv(f"data_generated/flights_fuel_opt_{map_type}.csv")
 df_cost = pd.read_csv(f"data_generated/df_cost_{map_type}.csv")
 df_real = pd.read_parquet(f"data_generated/opensky2024_centroids_{map_type}.parquet")
 c_ends = pd.read_csv(f"data_generated/opensky_centroid_ends_{map_type}.csv")
-cost_grid = df_cost.cost.values.reshape(30, 20, 20)
+if df_cost.cost.values.shape[0]==30*20*20:
+    nx, ny,nz = 30,20,20
+else:
+    nx, ny,nz = 30,30,20
+cost_grid = df_cost.cost.values.reshape(nx, ny, nz)
 
 norm = plt.Normalize(vmin=0.00001, vmax=0.0008)
 proj = ccrs.TransverseMercator(
@@ -139,8 +197,8 @@ ax.set_extent(
 
 norm = plt.Normalize(vmin=0.0001, vmax=0.04, clip=True)
 cntr = ax.contourf(
-    df_cost.longitude.values.reshape(30, 20, 20)[:, :, 5],
-    df_cost.latitude.values.reshape(30, 20, 20)[:, :, 5],
+    df_cost.longitude.values.reshape(nx, ny, nz)[:, :, 5],
+    df_cost.latitude.values.reshape(nx, ny, nz)[:, :, 5],
     cost_grid[:, :, 3],
     cmap="binary",
     transform=trans,
@@ -148,7 +206,8 @@ cntr = ax.contourf(
     norm=norm,
     alpha=0.5,
 )
-
+# xx=10
+# for i, fid in enumerate(flights0.fid.unique()[xx:xx+1]):
 for i, fid in enumerate(flights0.fid.unique()[:]):
 
     flightr = df_real.query(f"flight_id=='{fid}'")
@@ -192,22 +251,290 @@ plt.legend()
 plt.tight_layout()
 plt.savefig(f"figs/frn_{map_type}.png", bbox_inches="tight")
 plt.show()
-# %%
+## %%
 # $\mu_{\text{Fuel}}$ & \SI{954.0}{\kilogram} & \SI{956.2}{\kilogram} & \SI{1484.1}{\kilogram} \\
 # $\mu_{\text{Cost}}$ &\num{8.189e-3} & \num{7.903e-3} & \num{9.688e-3} \\
 # $\Sigma_{\text{Fuel}}$ & \SI{12402}{\kilogram} & \SI{12430}{\kilogram} & \SI{19293}{\kilogram} \\
 # $\Sigma_{\text{Cost}}$ & \num{106.5e-3} & \num{102.7e-3} & \num{125.9e-3} \\
 # %%
-map_type = "D"
+map_type = "DN"
 flights = pd.read_csv(f"data_generated/flights_noise_opt_{map_type}.csv")
 flights0 = pd.read_csv(f"data_generated/flights_fuel_opt_{map_type}.csv")
+# for i, fid in enumerate(flights0.fid.unique()[:]):
+# xx=0
+# for i, fid in enumerate(flights0.fid.unique()[xx:xx+1]):
+f_tot=0
+f0_tot = 0
 for i, fid in enumerate(flights0.fid.unique()[:]):
     flight = flights.query("fid==@fid")
     flight0 = flights0.query("fid==@fid")
-    print("cost", flight.cost_grid.sum() / flight0.cost_grid.sum())
-    print("fuel", flight.fuel.sum() / flight0.fuel.sum())
-print("cost_tot", flights.cost_grid.sum() / flights0.cost_grid.sum())
-print("fuel_tot", flights.fuel.sum() / flights0.fuel.sum())
+    # cost = ((0.02*flight.cost_grid*flight.thrust+flight.fuelflow)*flight.ts.diff().values[-1]).sum()
+    # cost0 = ((0.02*flight0.cost_grid*flight0.thrust+flight0.fuelflow)*flight0.ts.diff().values[-1]).sum()
+    cost = ((flight.cost_grid*flight.thrust)*flight.ts.diff().values[-1]).sum()
+    cost0 = ((flight0.cost_grid*flight0.thrust)*flight0.ts.diff().values[-1]).sum()
+    fuel = (flight.mass.values[0]-flight.mass.values[-1])/ (flight0.mass.values[0]-flight0.mass.values[-1])
+    cost_grid = flight.cost_grid.sum() / flight0.cost_grid.sum()
+    print(i, fid[:5], "\tcost", f"{cost/cost0:.4f}",
+          "\tfuel",f"{fuel:.4f}",
+          "\tcost_grid", f"{cost_grid:.4f}")
+    f_tot = f_tot+(flight.mass.values[0]-flight.mass.values[-1])
+    f0_tot = f0_tot+(flight0.mass.values[0]-flight0.mass.values[-1])
+print("cost_t", round(flights.cost_grid.sum() / flights0.cost_grid.sum(),4), 
+      "\tfuel_t", f_tot / f0_tot)
+
+
+#%%
+# %%
+def obj_max_fuel(x, u, dt, **kwargs):
+    xp, yp, h, m, ts = x[0], x[1], x[2], x[3], x[4]
+    mach, vs, psi = u[0], u[1], u[2]
+    tas = aero_casadi.mach2tas(mach, h)
+    D = optimizer.drag.clean(m, tas, h / aero.ft, vs / aero.fpm)
+    gamma = np.arctan2(vs, tas)
+    thrust = D + m * 9.81 * casadi.sin(gamma)
+    cost = optimizer.obj_grid_cost(x, u, dt, n_dim=3, time_dependent=False, **kwargs)
+    fuel = optimizer.obj_fuel(x, u, dt, **kwargs)
+    return  0.0004*cost*thrust*dt+fuel
+
+#%%
+map_type = "N"
+eham = nav.airport("EHAM")
+actype = "a320"
+start = (eham["lat"], eham["lon"])
+nodes = 39
+c_ends = pd.read_csv(f"data_generated/opensky_centroid_ends_{map_type}.csv")
+df_cost = pd.read_csv(f"data_generated/df_cost_{map_type}.csv")
+
+flights0 = None
+flights = None
+# xx=2
+# for i in tqdm(c_ends.index[xx:xx+1]):
+for i in tqdm(c_ends.index[:]):
+    fid = c_ends.fid.values[i]
+
+
+    #for now the runways are not used
+    rwy = airports["EHAM"].runways.data.query(f"name=='{c_ends.runway.values[i]}'")
+    if rwy is None or len(rwy)==0:
+        trk_start = None
+        start = "EHAM"
+    else:
+        trk_start=rwy.bearing.values[0]
+        start = (rwy.latitude.values[0],rwy.longitude.values[0])
+    
+    m0 = c_ends.tow.values[i] / prop.aircraft(actype)["mtow"]
+    if m0 >0.95:
+        m0 =0.99*m0
+    end = (c_ends.latitude.values[i], c_ends.longitude.values[i])
+    h_end=c_ends.altitude.values[i] * aero.ft
+    # generate fuel optimal trajectory
+    optimizer = top.Climb(actype, start, end, m0=m0)
+    optimizer.setup(nodes=nodes, max_iteration=3000, debug=False)
+    flight_fuel = optimizer.trajectory(
+        objective="fuel",
+        h_end=h_end,
+        runway_dir=trk_start,
+    )
+    if flight_fuel is None:
+        m0 =0.99*m0
+        optimizer = top.Climb(actype, start, end, m0=m0)
+        optimizer.setup(nodes=nodes, max_iteration=5000, debug=False)
+        flight_fuel = optimizer.trajectory(
+            objective="fuel",
+            h_end=h_end,
+            runway_dir=trk_start,
+        )
+    if flight_fuel is None:
+        print(i, fid, "fuel optimization failed")
+        continue
+    flight_fuel = flight_fuel.assign(fid=fid)
+    drag = openap.Drag("a320", wave_drag=True)
+    D = drag.clean(
+        mass=flight_fuel.mass, 
+        tas=flight_fuel.tas, 
+        alt=flight_fuel.altitude, 
+        vs=flight_fuel.vertical_rate, 
+        )
+    gamma = np.arctan2(flight_fuel.vertical_rate * openap.aero.fpm, flight_fuel.tas * openap.aero.kts)
+    flight_fuel = flight_fuel.assign(thrust = D + flight_fuel.mass * 9.81 * np.sin(gamma))
+    # generate optimalpopulation exposure trajectory
+    optimizer = top.Climb(actype, start, end, m0=m0)
+    optimizer.setup(nodes=nodes, max_iteration=5000, debug=False)
+    # stime = time.time()
+    interpolant = top.tools.interpolant_from_dataframe(df_cost)
+    if map_type == "N":
+        max_fuel = (flight_fuel.mass.values[0]-flight_fuel.mass.values[-1])*1.025
+    else:
+        max_fuel = (flight_fuel.mass.values[0]-flight_fuel.mass.values[-1])*1.015
+
+    flight_pop = optimizer.trajectory(
+        objective=obj_max_fuel,
+        interpolant=interpolant,
+        h_end=h_end,
+        runway_dir=trk_start,
+        max_fuel=max_fuel,
+        initial_guess=flight_fuel,
+    )
+    # print(i, fid, "time:",{round(etime - stime)}, "s")
+    if flight_pop is None:
+        print(i, fid, "noise optimization failed")
+        continue
+    flight_pop=flight_pop.assign(fid=fid)
+    
+    drag = openap.Drag("a320", wave_drag=True)
+    D = drag.clean(
+        mass=flight_pop.mass, 
+        tas=flight_pop.tas, 
+        alt=flight_pop.altitude, 
+        vs=flight_pop.vertical_rate, 
+        )
+    gamma = np.arctan2(flight_pop.vertical_rate * openap.aero.fpm, flight_pop.tas * openap.aero.kts)
+    flight_pop = flight_pop.assign(thrust = D + flight_pop.mass * 9.81 * np.sin(gamma))
+    # calculate cost from grid cost
+    cost = interpolant(
+        np.array([flight_pop.longitude.values, flight_pop.latitude.values, flight_pop.h.values])
+    )
+    cost0 = interpolant(
+        np.array([flight_fuel.longitude.values, flight_fuel.latitude.values, flight_fuel.h.values])
+    )
+    flight_pop = flight_pop.assign(cost_grid=cost.full()[0])
+    flight_fuel = flight_fuel.assign(cost_grid=cost0.full()[0])
+
+    if flights0 is None:
+        flights = flight_pop
+        flights0 = flight_fuel
+    else:
+        flights = pd.concat([flights, flight_pop])
+        flights0 = pd.concat([flights0, flight_fuel])
+
+flights.to_csv(f"data_generated/flights_noise_opt_{map_type}_max_fuel.csv", index=False)
+flights0.to_csv(f"data_generated/flights_fuel_opt_{map_type}_max_fuel.csv", index=False)
+# %%
+import cartopy.crs as ccrs
+from cartopy.feature import BORDERS, COASTLINE
+import matplotlib.colors as mcolors
+
+# map_type = "DN"
+colors = list(mcolors.TABLEAU_COLORS.keys())
+colors.extend(["b", "g", "y", "m", "c"])
+# flights = pd.read_csv(f"data_generated/flights_noise_opt_{map_type}_max_fuel.csv")
+# flights0 = pd.read_csv(f"data_generated/flights_fuel_opt_{map_type}_max_fuel.csv")
+df_cost = pd.read_csv(f"data_generated/df_cost_{map_type}.csv")
+df_real = pd.read_parquet(f"data_generated/opensky2024_centroids_{map_type}.parquet")
+c_ends = pd.read_csv(f"data_generated/opensky_centroid_ends_{map_type}.csv")
+if df_cost.cost.values.shape[0]==30*20*20:
+    nx, ny,nz = 30,20,20
+else:
+    nx, ny,nz = 30,30,20
+cost_grid = df_cost.cost.values.reshape(nx, ny, nz)
+
+norm = plt.Normalize(vmin=0.00001, vmax=0.0008)
+proj = ccrs.TransverseMercator(
+    central_longitude=eham["lon"], central_latitude=eham["lat"]
+)
+trans = ccrs.PlateCarree()
+fig, ax = plt.subplots(
+    1,
+    1,
+    figsize=(6, 6),
+    subplot_kw=dict(projection=proj),
+)
+
+ax.add_feature(BORDERS, linestyle="dotted", alpha=0.4)
+ax.add_feature(COASTLINE, linestyle="dotted", alpha=0.4)
+ax.set_extent(
+    [
+        min(flights.longitude.values) - 0.2,
+        max(flights.longitude.values) + 0.2,
+        min(flights.latitude.values) - 0.2,
+        max(flights.latitude.values) + 0.2,
+    ]
+)
+
+norm = plt.Normalize(vmin=0.0001, vmax=0.04, clip=True)
+cntr = ax.contourf(
+    df_cost.longitude.values.reshape(nx, ny, nz)[:, :, 5],
+    df_cost.latitude.values.reshape(nx, ny, nz)[:, :, 5],
+    cost_grid[:, :, 3],
+    cmap="binary",
+    transform=trans,
+    levels=12,
+    norm=norm,
+    alpha=0.5,
+)
+# xx=0
+# for i, fid in enumerate(flights0.fid.unique()[xx:xx+1]):
+for i, fid in enumerate(flights0.fid.unique()[:]):
+
+    flightr = df_real.query(f"flight_id=='{fid}'")
+    ax.plot(
+        flightr.longitude,
+        flightr.latitude,
+        color="tab:blue",
+        lw=2,
+        transform=trans,
+        label="Real flights centroids" if i == 0 else None,
+    )
+    flight = flights.query("fid==@fid")
+    flight0 = flights0.query("fid==@fid")
+    ax.plot(
+        flight.query("cost_grid>0").longitude,
+        flight.query("cost_grid>0").latitude,
+        color="k",
+        lw=2,
+        transform=trans,
+        label="Noise-optimal" if i == 0 else None,
+    )
+    ax.plot(
+        flight.longitude,
+        flight.latitude,
+        color="k",
+        lw=1,
+        linestyle="dashed",
+        transform=trans,
+    )
+    ax.plot(
+        flight0.longitude,
+        flight0.latitude,
+        color="r",
+        lw=1,
+        linestyle="dashed",
+        transform=trans,
+        label=f"Fuel-optimal" if i == 0 else None,
+    )
+
+plt.legend()
+plt.tight_layout()
+plt.savefig(f"figs/frn_{map_type}_max_fuel.png", bbox_inches="tight")
+plt.show()
+## %%
+# $\mu_{\text{Fuel}}$ & \SI{954.0}{\kilogram} & \SI{956.2}{\kilogram} & \SI{1484.1}{\kilogram} \\
+# $\mu_{\text{Cost}}$ &\num{8.189e-3} & \num{7.903e-3} & \num{9.688e-3} \\
+# $\Sigma_{\text{Fuel}}$ & \SI{12402}{\kilogram} & \SI{12430}{\kilogram} & \SI{19293}{\kilogram} \\
+# $\Sigma_{\text{Cost}}$ & \num{106.5e-3} & \num{102.7e-3} & \num{125.9e-3} \\
+# %%
+map_type = map_type
+# flights = pd.read_csv(f"data_generated/flights_noise_opt_{map_type}_max_fuel.csv")
+# flights0 = pd.read_csv(f"data_generated/flights_fuel_opt_{map_type}_max_fuel.csv")
+# for i, fid in enumerate(flights0.fid.unique()[:]):
+# xx=0
+# for i, fid in enumerate(flights0.fid.unique()[xx:xx+1]):
+f_tot=0
+f0_tot = 0
+for i, fid in enumerate(flights0.fid.unique()[:]):
+    flight = flights.query("fid==@fid")
+    flight0 = flights0.query("fid==@fid")
+    cost = ((0.02*flight.cost_grid*flight.thrust+flight.fuelflow)*flight.ts.diff().values[-1]).sum()
+    cost0 = ((0.02*flight0.cost_grid*flight0.thrust+flight0.fuelflow)*flight0.ts.diff().values[-1]).sum()
+    fuel = (flight.mass.values[0]-flight.mass.values[-1])/ (flight0.mass.values[0]-flight0.mass.values[-1])
+    cost_grid = flight.cost_grid.sum() / flight0.cost_grid.sum()
+    print(i, fid[:5], "\tcost", f"{cost/cost0:.4f}",
+          "\tfuel",f"{fuel:.4f}",
+          "\tcost_grid", f"{cost_grid:.4f}")
+    f_tot = f_tot+(flight.mass.values[0]-flight.mass.values[-1])
+    f0_tot = f0_tot+(flight0.mass.values[0]-flight0.mass.values[-1])
+print("cost_t", round(flights.cost_grid.sum() / flights0.cost_grid.sum(),4), 
+      "\tfuel_t", f_tot / f0_tot)
 # %%
 import matplotlib.colors as mcolors
 from traffic.core import Traffic, Flight
@@ -215,9 +542,9 @@ from traffic.core import Traffic, Flight
 
 colors = list(mcolors.TABLEAU_COLORS.keys())
 colors.extend(["r", "b", "g", "y", "m", "c"])
-flights = pd.read_csv(f"data_generated/opsk_flights_noise_realistic_{map_type}.csv")
-flights0 = pd.read_csv(f"data_generated/opsk_flights0_fuel_realistic_{map_type}.csv")
-df_cost = pd.read_csv(f"data_generated/df_cost_{map_type}_2024.csv")
+flights = pd.read_csv(f"data_generated/flights_noise_opt_{map_type}.csv")
+flights0 = pd.read_csv(f"data_generated/flights_fuel_opt_{map_type}.csv")
+df_cost = pd.read_csv(f"data_generated/df_cost_{map_type}.csv")
 df_real = (
     pd.read_parquet(f"data_generated/opensky2024_centroids_{map_type}.parquet")
     # .query("flight_id=='VLG12BR_219'")
@@ -238,7 +565,7 @@ def fuel_assign(flight):
 t_real = t_real.pipe(fuel_assign).eval(6)
 df_real = t_real.data
 c_ends = pd.read_csv(f"data_generated/opensky_centroid_ends_{map_type}.csv")
-df_all = pd.read_parquet(f"data_generated/opensky2024_clustererd_flights_{map_type}.parquet")
+df_all = pd.read_parquet(f"data_generated/opensky2024_clustered_flights_{map_type}.parquet")
 import cartopy.crs as ccrs
 from cartopy.feature import BORDERS, COASTLINE
 
@@ -283,9 +610,9 @@ for fid in flights.fid.unique():
     )
 
     fig, ((ax0, ax1), (ax2, ax3)) = plt.subplots(2, 2, figsize=(10, 10))
-    ax0.plot(flightr.ts, flightr.fuel, "r", label="Real")
-    ax0.plot(flight0.ts, flight0.fuel, "k", label="fuel")
-    ax0.plot(flightn.ts, flightn.fuel, "g", label="noiseN")
+    ax0.plot(flightr.ts, flightr.fuelflow, "r", label="Real")
+    ax0.plot(flight0.ts, flight0.fuelflow, "k", label="fuel")
+    ax0.plot(flightn.ts, flightn.fuelflow, "g", label="noiseN")
     ax0.set_ylabel("fuel")
     ax0.set_xlabel("ts")
     ax0.set_title("fuel")
@@ -325,9 +652,9 @@ for fid in flights.fid.unique():
     plt.show()
     print([fid] * 3)
 
-    print("flightn", flightn.cost.sum(), flightn.noise.sum(), flightn.fuel.sum())
-    print("flightr", flightr.cost.sum(), flightr.noise.sum(), flightr.fuel.sum())
-    print("flight0", flight0.cost.sum(), flight0.noise.sum(), flight0.fuel.sum())
+    print("flightn", flightn.cost.sum(), flightn.noise.sum(), flightn.fuelflow.sum())
+    print("flightr", flightr.cost.sum(), flightr.noise.sum(), flightr.fuelflow.sum())
+    print("flight0", flight0.cost.sum(), flight0.noise.sum(), flight0.fuelflow.sum())
     df_costs.append(
         # np.array([fid,
         #     flightr.cost.sum(),
@@ -349,9 +676,9 @@ for fid in flights.fid.unique():
             "noises_r": flightr.noise.sum(),
             "noises_n": flightn.noise.sum(),
             "noises_f": flight0.noise.sum(),
-            "fuels_r": flightr.fuel_sum.values[0],
-            "fuels_n": flightn.fuel.sum(),
-            "fuels_f": flight0.fuel.sum(),
+            "fuels_r": (flightr.mass.values[0]-flightr.mass.values[-1]),
+            "fuels_n": (flightn.mass.values[0]-flightn.mass.values[-1]),
+            "fuels_f": (flight0.mass.values[0]-flight0.mass.values[-1]),
         },
     )
 # %%

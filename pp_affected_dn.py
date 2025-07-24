@@ -11,7 +11,7 @@ from openap import aero, nav, top, prop
 from tqdm import tqdm
 from traffic.data import navaids, airports
 
-idd = "N"
+idd = "D"
 treshold = 60  # db
 crs_3035 = CRS.from_epsg(3035)
 crs_4326 = CRS.from_epsg(4326)
@@ -19,9 +19,9 @@ transformer_xy = Transformer.from_crs(crs_4326, crs_3035, always_xy=True)
 transformer_ll = Transformer.from_crs(crs_3035, crs_4326, always_xy=True)
 eham = nav.airport("EHAM")
 
-flights = pd.read_csv(f"data_generated/opsk_flights_noise_realistic_{idd}.csv")
-flights0 = pd.read_csv(f"data_generated/opsk_flights0_fuel_realistic_{idd}.csv")
-df_cost = pd.read_csv(f"data_generated/df_cost_{idd}_2024.csv")
+flights = pd.read_csv(f"data_generated/flights_noise_opt_{idd}.csv")
+flights0 = pd.read_csv(f"data_generated/flights_fuel_opt_{idd}.csv")
+df_cost = pd.read_csv(f"data_generated/df_cost_{idd}.csv")
 df_real = pd.read_parquet(f"data_generated/opensky2024_centroids_{idd}.parquet")
 
 max_lola = (df_real.longitude.max() + 0.3, df_real.latitude.max() + 0.3)
@@ -90,7 +90,7 @@ for fid in tqdm(flights.fid.unique()):
     pp_dict.append(
         {
             "fid": fid,
-            "fuel": flight.fuel.sum(),
+            "fuel": (flight.mass.values[0]-flight.mass.values[-1]),
             "cost_grid": flight.cost_grid.sum(),
             "people_affected_sum_all": people_affected,
             "pp_unique_sum": result,
@@ -141,7 +141,7 @@ for fid in tqdm(flights0.fid.unique()):
     pp_dict.append(
         {
             "fid": fid,
-            "fuel": flight.fuel.sum(),
+            "fuel": (flight.mass.values[0]-flight.mass.values[-1]),
             "cost_grid": flight.cost_grid.sum(),
             "people_affected_sum_all": people_affected,
             "pp_unique_sum": result,
@@ -164,11 +164,11 @@ for fid in tqdm(df_real.flight_id.unique()):
     dist_0 = np.where(dist > 45000 * aero.ft, -100, dist)
 
     noise = np.zeros(dist_0.shape)
-    for i in range(40):
+    for i in range(len(flight)):
         thr = flight.thrust.values[i]
         ns = interp_npd(np.array([np.array([thr] * len(dist_0[i])), dist_0[i]]).T)
         noise[i] = np.where(dist_0[i] < 0, 0, ns)
-    aggregated_noise = np.sum(noise.reshape(40, len(pop_y), -1), axis=0)
+    aggregated_noise = np.sum(noise.reshape(len(flight), len(pop_y), -1), axis=0)
     # plt.contour(pop_x,pop_lat,aggregated_noise.T, cmap = "Reds")
     # plt.plot(flight.longitude,flight.latitude)
     population = pop_map.pp.values.reshape(len(pop_x), len(pop_y))
@@ -189,7 +189,7 @@ for fid in tqdm(df_real.flight_id.unique()):
     pp_dict.append(
         {
             "fid": fid,
-            "fuel": flight.fuel.sum(),
+            "fuel":(flight.mass.values[0]-flight.mass.values[-1]),
             # "cost_grid": flight.cost_grid.sum(),
             "people_affected_sum_all": people_affected,
             "pp_unique_sum": result,
@@ -302,7 +302,7 @@ import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 
 cmap = plt.cm.viridis.copy()
-
+flight = pd.read_csv(f"data_generated/flights_noise_opt_{idd}.csv").query("fid==fid.iloc[0]")
 Z = noise.reshape(40, len(pop_y), -1)
 Z2 = affected_pop.reshape(40, len(pop_y), -1)
 # Create a 3D plot
@@ -363,7 +363,7 @@ cbar = plt.colorbar(cntr, shrink=0.4, orientation="horizontal", pad=0.08)
 cbar.set_ticks(np.arange(0, 90.0, 20))
 # cbar.set_ticklabels(["Low", "High"])
 
-cbar.ax.set_xlabel("Noise, dBA)", rotation=0, labelpad=5)
+cbar.ax.set_xlabel("Noise, dBA", rotation=0, labelpad=5)
 yticks = ax.get_yticks()
 xticks = ax.get_xticks()
 
@@ -439,7 +439,7 @@ map_object = LinearSegmentedColormap.from_list(
 plt.colormaps.register(cmap=map_object)
 
 # %%
-idd = "N"
+idd = "D"
 treshold = 50  # db
 crs_3035 = CRS.from_epsg(3035)
 crs_4326 = CRS.from_epsg(4326)
@@ -448,7 +448,7 @@ transformer_ll = Transformer.from_crs(crs_3035, crs_4326, always_xy=True)
 eham = nav.airport("EHAM")
 
 
-df_cost = pd.read_csv(f"data_generated/df_cost_{idd}_2024.csv")
+df_cost = pd.read_csv(f"data_generated/df_cost_{idd}.csv")
 df_real = (
     pd.read_parquet(f"data_generated/opensky2024_centroids_{idd}.parquet")
     # .query("flight_id=='VLG12BR_219'")
@@ -486,12 +486,12 @@ interp_npd = RegularGridInterpolator(
 pp_dict = []
 ################################################################
 #######################################
-flights = pd.read_csv(f"data_generated/opsk_flights_noise_realistic_{idd}.csv")
-flights0 = pd.read_csv(f"data_generated/opsk_flights0_fuel_realistic_{idd}.csv")
+flights = pd.read_csv(f"data_generated/flights_noise_opt_{idd}.csv")
+flights0 = pd.read_csv(f"data_generated/flights_fuel_opt_{idd}.csv")
 if idd == "D":
-    fid = flights.fid.unique()[8]
+    fid = flights.fid.unique()[7]
 else:
-    fid = flights.fid.unique()[-2]
+    fid = flights.fid.unique()[6]
 for i in tqdm([1]):
     flight = flights.query(f"fid=='{fid}'")
     flight = flight.reset_index(drop=True)

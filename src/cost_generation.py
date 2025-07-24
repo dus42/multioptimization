@@ -11,7 +11,7 @@ import matplotlib.pyplot as plt
 import cartopy.crs as ccrs
 from cartopy.feature import BORDERS, COASTLINE 
 #%%
-def downsample_array(pop_x, max_length=170):
+def downsample_array(pop_x, max_length=270):
     if len(pop_x) <= max_length:
         return pop_x
     indices = np.linspace(0, len(pop_x) - 1, max_length, dtype=int)
@@ -399,7 +399,7 @@ def cost_generator(
 
         plt.tight_layout()
         plt.savefig("cost_map.png", bbox_inches = "tight",dpi=300)
-        plt.show()
+        # plt.show()
     return df_cost
 
 
@@ -428,3 +428,5 @@ def cost_generator(
 #     norm=norm,
 #     s=100,
 # )
+
+# %%

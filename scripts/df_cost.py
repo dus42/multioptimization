@@ -13,6 +13,7 @@ import cartopy.crs as ccrs
 from cartopy.feature import BORDERS, COASTLINE 
 import click
 import sys
+import os
 sys.path.append(os.path.abspath("../src/"))
 from cost_generation import cost_generator
 #%%
@@ -23,7 +24,7 @@ from cost_generation import cost_generator
 def main(map_type, plot):
     # map = "DN"
     nx = 30
-    ny = 20
+    ny = 30
     nz = 20
     eham = nav.airport("EHAM")
     ends = pd.read_csv(f"../data_generated/opensky_centroid_ends_{map_type}.csv")[
@@ -58,10 +59,11 @@ def main(map_type, plot):
                             nodes = (nx,ny,nz), 
                             airport = "EHAM",
                             bounds = bounds, 
-                            max_res_len=230,
+                            max_res_len=400,
                             plot = plot)
     df_cost.to_csv(f"../data_generated/df_cost_{map_type}.csv", index=False)
 
 # %%
 if __name__ == "__main__":
     main()
+# %%

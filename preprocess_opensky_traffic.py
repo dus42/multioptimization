@@ -3,8 +3,11 @@ import pandas as pd
 import numpy as np
 from traffic.core import Flight, Traffic
 from glob import glob
-from openap import aero, Thrust, prop, FuelFlow
+from openap import aero, Thrust, prop, FuelFlow, Drag
 from traffic.data import airports
+import warnings
+warnings.filterwarnings("ignore")
+
 # %%
 def sort_timestamp(flight):
     return Flight(flight.data.sort_values(by=["timestamp"]))
@@ -94,6 +97,7 @@ t = Traffic(
 # %%
 def find_arrival(flight):
     flights_info = pd.read_csv("data_raw/flights_info.csv")#[["icao24","departure","arrival","callsign","day"]]
+    flights_info = flights_info.query("arrival in @airports.data.icao")
     flights_info["day"] = pd.to_datetime(flights_info["day"]).dt.tz_localize(None)
     flights_info["firstseen"] = pd.to_datetime(flights_info["firstseen"]).dt.tz_localize(None)
     df = flight.data
@@ -108,11 +112,11 @@ def find_arrival(flight):
     return Flight(df)
 
 
-thrust = Thrust("a320")
 
-mass_estim_coefs = np.array([1.45557, -2.11051, 187.53086,55622.0])
+
+mass_estim_coefs = np.array([1.32, -2.21, 155, 73360.0])
 # Coefficients: TOW = (1.45557) * dist + (-2.11051) * h +(187.53086) * TAS + (55622.0)
-
+#new coefs: TOW = 1.32 * dist + (-2.21)*h  + 155 * TAS + 73360
 def drop_dups(f):
     return f.drop_duplicates(subset=["timestamp"], keep="first").drop_duplicates(
         subset=["latitude", "longitude"], keep="first"
@@ -120,7 +124,7 @@ def drop_dups(f):
 def assign_tow(f):
     m_mtow = prop.aircraft("a320")["limits"]["MTOW"]
     oew = prop.aircraft("a320")["limits"]["OEW"]
-    mass_estim_coefs = np.array([1.45557, -2.11051, 187.53086,55622.0])
+    mass_estim_coefs = np.array([1.32, -2.21, 155, 73360])
     arrival = f.data.arrival.values[0]
     if type(arrival) is type("string") and arrival!="NaN":
         if arrival =="LDZK":
@@ -158,12 +162,29 @@ def assign_mass(f):
 
 
 def assign_thrust(f):
-    return f.assign(
-        thrust=lambda x: thrust.enroute(
-            mass=x.mass, tas=x.groundspeed, alt=x.altitude, vs=x.vertical_rate
-        )
-    )
+    drag = Drag("a320", wave_drag=True)
+    thrust = Thrust("a320")
+    mass=f.data.mass
+    tas=f.data.groundspeed
+    alt=f.data.altitude
+    vs=f.data.vertical_rate 
+    D = drag.clean(mass=mass, tas=tas, alt=alt, vs=vs)
+    gamma = np.arctan2(vs * aero.fpm, tas* aero.kts)
+    T = D + mass * 9.81 * np.sin(gamma)
+    
+    T_max = thrust.climb(tas=tas, alt=alt, roc=0)
+    T_idle = thrust.descent_idle(tas=tas, alt=alt)
 
+    T = (
+        (
+            np.log(1 + np.exp(20 * (T - T_idle * 0.8) / 100_000))
+            - np.log(1 + np.exp(20 * (T - T_max * 1.2) / 100_000))
+        )
+        / (np.log(1 + np.exp(20)))
+    ) * 100_000 + T_idle * 0.8
+
+    return f.assign(thrust=T)
+#%%
 t = (
     t.pipe(drop_dups)
     .pipe(find_arrival)
@@ -171,7 +192,7 @@ t = (
     .pipe(assign_fuel)#not needed
     .pipe(assign_mass)
     .pipe(assign_thrust)#not needed
-    .eval(6)
+    .eval(6, desc="preprocessing")
 )
 t = t.query("distance<220").compute_xy()
 t = t.assign(
