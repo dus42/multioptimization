@@ -34,11 +34,12 @@ def obj_pop_exposure_night(x, u, dt, **kwargs):
     return  0.00035*cost*thrust*dt+fuel
     
 #%%
-map_type = "N"
+map_type = "D"
 eham = nav.airport("EHAM")
 actype = "a320"
 start = (eham["lat"], eham["lon"])
 nodes = 39
+nx, ny,nz = 50,40,23
 c_ends = pd.read_csv(f"data_generated/opensky_centroid_ends_{map_type}.csv")
 df_cost = pd.read_csv(f"data_generated/df_cost_{map_type}.csv")
 
@@ -96,7 +97,7 @@ for i in tqdm(c_ends.index[:]):
     flight_fuel = flight_fuel.assign(thrust = D + flight_fuel.mass * 9.81 * np.sin(gamma))
     # generate optimalpopulation exposure trajectory
     optimizer = top.Climb(actype, start, end, m0=m0)
-    optimizer.setup(nodes=nodes, max_iteration=5000, debug=False)
+    optimizer.setup(nodes=nodes, max_iteration=7000, debug=False)
     # stime = time.time()
     interpolant = top.tools.interpolant_from_dataframe(df_cost)
     if map_type == "N":
@@ -158,18 +159,15 @@ import cartopy.crs as ccrs
 from cartopy.feature import BORDERS, COASTLINE
 import matplotlib.colors as mcolors
 
-# map_type = "DN"
+map_type = "N"
 colors = list(mcolors.TABLEAU_COLORS.keys())
 colors.extend(["b", "g", "y", "m", "c"])
-# flights = pd.read_csv(f"data_generated/flights_noise_opt_{map_type}.csv")
-# flights0 = pd.read_csv(f"data_generated/flights_fuel_opt_{map_type}.csv")
+flights = pd.read_csv(f"data_generated/flights_noise_opt_{map_type}.csv")
+flights0 = pd.read_csv(f"data_generated/flights_fuel_opt_{map_type}.csv")
 df_cost = pd.read_csv(f"data_generated/df_cost_{map_type}.csv")
 df_real = pd.read_parquet(f"data_generated/opensky2024_centroids_{map_type}.parquet")
 c_ends = pd.read_csv(f"data_generated/opensky_centroid_ends_{map_type}.csv")
-if df_cost.cost.values.shape[0]==30*20*20:
-    nx, ny,nz = 30,20,20
-else:
-    nx, ny,nz = 30,30,20
+
 cost_grid = df_cost.cost.values.reshape(nx, ny, nz)
 
 norm = plt.Normalize(vmin=0.00001, vmax=0.0008)
@@ -195,14 +193,16 @@ ax.set_extent(
     ]
 )
 
-norm = plt.Normalize(vmin=0.0001, vmax=0.04, clip=True)
+norm = plt.Normalize(vmin=0.00001, vmax=0.03, clip=True)
+if map_type=="DN":
+    norm = plt.Normalize(vmin=0.00001, vmax=0.05, clip=True)
 cntr = ax.contourf(
-    df_cost.longitude.values.reshape(nx, ny, nz)[:, :, 5],
-    df_cost.latitude.values.reshape(nx, ny, nz)[:, :, 5],
+    df_cost.longitude.values.reshape(nx, ny, nz)[:, :, 3],
+    df_cost.latitude.values.reshape(nx, ny, nz)[:, :, 3],
     cost_grid[:, :, 3],
     cmap="binary",
     transform=trans,
-    levels=12,
+    levels=25,
     norm=norm,
     alpha=0.5,
 )
@@ -257,7 +257,7 @@ plt.show()
 # $\Sigma_{\text{Fuel}}$ & \SI{12402}{\kilogram} & \SI{12430}{\kilogram} & \SI{19293}{\kilogram} \\
 # $\Sigma_{\text{Cost}}$ & \num{106.5e-3} & \num{102.7e-3} & \num{125.9e-3} \\
 # %%
-map_type = "DN"
+map_type = map_type
 flights = pd.read_csv(f"data_generated/flights_noise_opt_{map_type}.csv")
 flights0 = pd.read_csv(f"data_generated/flights_fuel_opt_{map_type}.csv")
 # for i, fid in enumerate(flights0.fid.unique()[:]):
@@ -302,6 +302,7 @@ eham = nav.airport("EHAM")
 actype = "a320"
 start = (eham["lat"], eham["lon"])
 nodes = 39
+nx, ny,nz = 50,40,23
 c_ends = pd.read_csv(f"data_generated/opensky_centroid_ends_{map_type}.csv")
 df_cost = pd.read_csv(f"data_generated/df_cost_{map_type}.csv")
 
@@ -414,18 +415,16 @@ import cartopy.crs as ccrs
 from cartopy.feature import BORDERS, COASTLINE
 import matplotlib.colors as mcolors
 
-# map_type = "DN"
+map_type = "DN"
 colors = list(mcolors.TABLEAU_COLORS.keys())
 colors.extend(["b", "g", "y", "m", "c"])
-# flights = pd.read_csv(f"data_generated/flights_noise_opt_{map_type}_max_fuel.csv")
-# flights0 = pd.read_csv(f"data_generated/flights_fuel_opt_{map_type}_max_fuel.csv")
+flights = pd.read_csv(f"data_generated/flights_noise_opt_{map_type}_max_fuel.csv")
+flights0 = pd.read_csv(f"data_generated/flights_fuel_opt_{map_type}_max_fuel.csv")
 df_cost = pd.read_csv(f"data_generated/df_cost_{map_type}.csv")
 df_real = pd.read_parquet(f"data_generated/opensky2024_centroids_{map_type}.parquet")
 c_ends = pd.read_csv(f"data_generated/opensky_centroid_ends_{map_type}.csv")
-if df_cost.cost.values.shape[0]==30*20*20:
-    nx, ny,nz = 30,20,20
-else:
-    nx, ny,nz = 30,30,20
+
+
 cost_grid = df_cost.cost.values.reshape(nx, ny, nz)
 
 norm = plt.Normalize(vmin=0.00001, vmax=0.0008)

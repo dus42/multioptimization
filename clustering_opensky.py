@@ -13,8 +13,8 @@ from sklearn.preprocessing import StandardScaler
 from scipy.spatial.distance import pdist, squareform
 
 # %%
-idd = "N"
-if idd == "DN":
+map_type = "N"
+if map_type == "DN":
     t = Traffic(
         pd.read_parquet(
             "data_generated/opensky_flights_2024dn_ready_for_clustering.parquet"
@@ -25,7 +25,7 @@ else:
         pd.read_parquet(
             "data_generated/opensky_flights_2024dn_ready_for_clustering.parquet"
         )
-    ).query(f"day_night=='{idd}'")
+    ).query(f"day_night=='{map_type}'")
 ids = []
 for f in t:
     if len(f) != 40:
@@ -208,9 +208,9 @@ for inx in saved_indices:
     plt.show()
 
 #%%
-if idd == "DN":
+if map_type == "DN":
     t_dbscan = t_dbscan.query("cluster not in [4,9,10,23]") ### DN
-elif idd == "D":
+elif map_type == "D":
     t_dbscan = t_dbscan.query("cluster not in [15,19]") ### D
 else:
     t_dbscan = t_dbscan.query("cluster not in [5]") ### N
@@ -391,9 +391,6 @@ for inx in saved_indices:
 
 
 
-
-
-
 #%%
 ends = []
 t_cnts = t_dbscan_1.query(f"flight_id in {saved_indices}")
@@ -412,10 +409,10 @@ ends = pd.DataFrame(
     ends, columns=["fid", "latitude", "longitude", "tow", "altitude", "runway"]
 )
 
-ends.to_csv(f"data_generated/opensky_centroid_ends_{idd}.csv", index=False)
-t_cnts.to_parquet(f"data_generated/opensky2024_centroids_{idd}.parquet", index=False)
+ends.to_csv(f"data_generated/opensky_centroid_ends_{map_type}.csv", index=False)
+t_cnts.to_parquet(f"data_generated/opensky2024_centroids_{map_type}.parquet", index=False)
 t_dbscan_1.to_parquet(
-    f"data_generated/opensky2024_clustered_flights_{idd}.parquet", index=False
+    f"data_generated/opensky2024_clustered_flights_{map_type}.parquet", index=False
 )
 # %%
 colors = list(mcolors.TABLEAU_COLORS.keys())
@@ -443,10 +440,10 @@ for inx in saved_indices:
     )
 
 # %%
-
+map_type ="N"
 t_dbscan_1 = Traffic(pd.read_parquet(
-    f"data_generated/opensky2024_clustererd_flights_{idd}.parquet"))
-ends=pd.read_csv(f"data_generated/opensky_centroid_ends_{idd}.csv")
+    f"data_generated/opensky2024_clustered_flights_{map_type}.parquet"))
+ends=pd.read_csv(f"data_generated/opensky_centroid_ends_{map_type}.csv")
 table = []
 run_dict= {"idd":1}
 for inx in ends.fid:
@@ -481,7 +478,39 @@ for inx in ends.fid:
     })
 df_tab = pd.DataFrame.from_dict(table).assign(idd_max_rwy = max(run_dict, key=run_dict.get),
         idd_max_rwy_flights= max(run_dict.values()))
-df_tab.to_csv(f"data_generated/clusters_table_{idd}.csv", index=False)
+df_tab.to_csv(f"data_generated/clusters_table_{map_type}.csv", index=False)
 df_tab
+
+# %%
+for map_type in ["DN","D","N"]:
+# for map_type in ["N"]:
+    if map_type == "DN":
+        cluster = 4
+    else:
+        cluster = 3
+    t = Traffic(
+        pd.read_parquet(
+            f"data_generated/opensky2024_clustered_flights_{map_type}.parquet"
+            ).query("cluster==@cluster and runway =='24'")
+    )
+    t = t[:50]
+    t.data.to_parquet(f"data_generated/opensky2024_runway24_{map_type}.parquet", index=False)
+    ends = []
+    for f in t:
+        ends.append(
+            [
+                f.data.flight_id.values[0],
+                f.data.latitude.values[-1],
+                f.data.longitude.values[-1],
+                f.data.tow.values[-1],
+                f.data.altitude.values[-1],
+                f.data.runway.values[-1],
+            ]
+        )
+    ends = pd.DataFrame(
+        ends, columns=["fid", "latitude", "longitude", "tow", "altitude", "runway"]
+    )
+
+    ends.to_csv(f"data_generated/opensky_runway24_ends_{map_type}.csv", index=False)
 
 # %%
