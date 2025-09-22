@@ -12,7 +12,7 @@ import sys
 import os
 
 # Get the parent directory and add it to sys.path
-sys.path.append(os.path.abspath("../pop_exposure/"))
+sys.path.append(os.path.abspath("../src/"))
 from pp_affected import pp_affected, cost_grid_cost, get_npd_interpolator
 #%%
 ac= "a320"
@@ -25,14 +25,15 @@ options = itertools.product(["N","D","DN"],[50,60,75], ["f","r","n"])
 for map_type,treshold,frn in options:
     print(map_type,treshold,frn)
     if map_type=="D" or map_type=="N":
-        pop_map = pd.read_parquet(curr_path+ f"/../data_raw/{map_type}012011_1K_cropped.parquet").rename(columns = {"popul":"pp"}).fillna(0)
+        pop_map = pd.read_parquet(curr_path+ f"/../data_raw/{map_type}032011_1K_cropped.parquet").rename(columns = {"popul":"pp"}).fillna(0)
     else:
         pop_map = pd.read_parquet(curr_path+ f"/../data_raw/pop_static.parquet")
-    
+        
+    flights = pd.read_csv(f"../data_generated/optimal_flights_{map_type}.csv")
     if frn=="f":
-        flights = pd.read_csv(curr_path+ f"/../data_generated/flights_fuel_opt_{map_type}.csv").assign(frn = "f")
+        flights = flights.query("obj=='pop'")
     elif frn=="n":   
-        flights = pd.read_csv(curr_path+ f"/../data_generated/flights_noise_opt_{map_type}.csv").assign(frn = "n")
+        flights = flights.query("obj=='pop'")
     else:
         flights = (pd.read_parquet(curr_path+ f"/../data_generated/opensky2024_centroids_{map_type}.parquet")
         .assign(frn = "r")
@@ -45,6 +46,8 @@ for map_type,treshold,frn in options:
         'mass',
         'vertical_rate',
         'tas',
+        'fuel',
+        'thrust',
         'h',
         'frn', ]])
     df_cost = pd.read_csv(curr_path+ f"/../data_generated/df_cost_{map_type}.csv")

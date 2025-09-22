@@ -40,7 +40,7 @@ def pp_affected(ac, pop_map, grid_type, flight, treshold):
     crs_4326 = CRS.from_epsg(4326)
     transformer_xy = Transformer.from_crs(crs_4326, crs_3035, always_xy=True)
     transformer_ll = Transformer.from_crs(crs_3035, crs_4326, always_xy=True)
-    thr = thrust.enroute(flight.mass.values[0], flight.tas.values,flight.altitude.values, flight.vertical_rate.values)
+    thr = flight.thrust
     ff = fuelflow.enroute(flight.mass.values[0], flight.tas.values,flight.altitude.values, flight.vertical_rate.values)
     flight = flight.assign(thrust = thr, fuel = ff*flight.ts.diff()).fillna(0)
     interp_npd = get_npd_interpolator(ac)

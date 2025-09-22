@@ -86,12 +86,12 @@ def downsample_coords(matrix):
     # Handle the last row if odd number of rows
     if rows % 2 == 1:
         last_row = matrix[rows-1, :even_cols,:]
-        result[new_rows-1, :cols//2,:] = last_row.reshape(-1, 2,2).sum(axis=1)
+        result[new_rows-1, :cols//2,:] = last_row.reshape(-1, 2,2).sum(axis=1)/2
     
     # Handle the last column if odd number of columns
     if cols % 2 == 1:
         last_col = matrix[:even_rows, cols-1,:]
-        result[:rows//2, new_cols-1,:] = last_col.reshape(-1, 2,2).sum(axis=1)
+        result[:rows//2, new_cols-1,:] = last_col.reshape(-1, 2,2).sum(axis=1)/2
     
     # Handle corner element if both dimensions are odd
     if rows % 2 == 1 and cols % 2 == 1:
@@ -399,7 +399,7 @@ def cost_generator(
 
         plt.tight_layout()
         plt.savefig("cost_map.png", bbox_inches = "tight",dpi=300)
-        # plt.show()
+        plt.show()
     return df_cost
 
 

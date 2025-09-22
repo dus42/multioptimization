@@ -691,14 +691,6 @@ df_costs = df_costs.assign(
 )
 df_costs.to_csv(f"df_costs_{map_type}.csv", index=False)
 # %%
-from openap import FuelFlow, Thrust
-
-ff = FuelFlow("a320")
-thr = Thrust("a320")
-fuel = ff.enroute(tow, tas, alt, vs) * ts.diff()
-thr.enroute(tow, tas, alt, vs)
-noise = cost * thr
-# %%
 import matplotlib.pyplot as plt
 
 import numpy as np
