@@ -402,7 +402,7 @@ ax.text(
 )
 
 
-cmap = plt.get_cmap("viridis")
+cmap = plt.get_cmap("viridis_r")
 cmap = matplotlib.colors.LinearSegmentedColormap.from_list(
     "narrow_viridis", cmap(np.linspace(0.3, 0.8, 256))
 )
@@ -455,9 +455,12 @@ for i, num in enumerate(flights.num.unique()):
 cbar = fig.colorbar(
     sm, ax=ax, orientation="horizontal", shrink=0.4, fraction=0.03, pad=0.02
 )
-cbar.set_ticks([0, 5])
-cbar.set_ticklabels(["Fuel optimal", "Population optimal"])
-# cbar.set_label("Flight ID")
+cbar.set_ticks(np.linspace(0, 5, 5))
+# cbar.set_ticks([0,5])
+# cbar.set_ticklabels(["Fuel optimal", "Population optimal"])
+cbar.set_ticklabels([0.0, 0.3, 1.5, 3.0, 9.0])
+# cbar.set_label(r"Fuel optimal   →   Population optimal")
+cbar.set_label(r"Cost-weighting factor $c_{dn}, × 10^{-4}$")
 # ax.legend()
 
 
@@ -565,7 +568,7 @@ def obj_noise_max_fuel(x, u, dt, optimizer, **kwargs):
 # for i,number in tqdm(enumerate([10,5,1, 0.004, 0.001, ])):
 for i, number in tqdm(enumerate([1.02, 1.011, 1.005, 1.001])):
     optimizer = top.Climb(ac, start, end, m0=m0)
-    optimizer.setup(nodes=nodes, max_iteration=45000, debug=True)
+    optimizer.setup(nodes=nodes, max_iteration=45000, debug=False)
     objective = partial(obj_noise_max_fuel, optimizer=optimizer)
     interpolant = top.tools.interpolant_from_dataframe(df_cost)
     flight = optimizer.trajectory(
@@ -643,7 +646,7 @@ ax.scatter(
 )
 
 
-cmap = plt.get_cmap("viridis")
+cmap = plt.get_cmap("Reds")
 cmap = matplotlib.colors.LinearSegmentedColormap.from_list(
     "narrow_viridis", cmap(np.linspace(0.3, 0.8, 256))
 )
@@ -690,9 +693,9 @@ for i, num in enumerate(flights.num.unique()):
 cbar = fig.colorbar(
     sm, ax=ax, orientation="horizontal", shrink=0.4, fraction=0.03, pad=0.02
 )
-cbar.set_ticks([0, 5])
-cbar.set_ticklabels(["Fuel optimal", "Population optimal"])
-# cbar.set_label("Flight ID")
+cbar.set_ticks(np.linspace(0, 5, 5))
+cbar.set_ticklabels(["0%", "0.1%", "0.5%", "1.1%", "2%"])
+cbar.set_label("Fuel allowence increment")
 # ax.legend()
 
 
