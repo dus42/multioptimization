@@ -117,7 +117,7 @@ cbar2 = plt.colorbar(
 cbar2.set_ticks([0, 0.104])
 cbar2.set_ticklabels(["Low", "High"])
 
-cbar2.ax.set_xlabel("Grid\ncost", rotation=0, labelpad=-185, fontsize=11)
+cbar2.ax.set_xlabel("Cost\ngrid", rotation=0, labelpad=-185, fontsize=11)
 
 plt.tight_layout()
 plt.savefig("../figs/cost_vs_pop.png", bbox_inches="tight", dpi=300)
@@ -317,28 +317,36 @@ gamma = np.arctan2(
 thrust = D + flights.mass * 9.81 * np.sin(gamma)
 flights = flights.assign(thrust=thrust)
 # %%
-max_fuel = True
+
 if max_fuel:
-    coef = "Max fuel"
+    coef = "Fuel constraint"
 else:
-    coef = r"$c_{dn}$"
+    coef = r"$c_{dn}, 10^{-4}$"
 latex_tab = []
 for i, num in enumerate(flights.num.unique()):
     flight = flights.query("num==@num")
     latex_tab.append(
         {
             "fid": flight.fid.iloc[0],
-            coef: flight.num.iloc[0],
+            coef: flight.num.iloc[0] * 100,
             "Fuel consumed, kg": flight.mass.iloc[0] - flight.mass.iloc[-1],
             r"$C_{grid}$": flight.cost_grid.sum(),
             r"$T \times C_{grid}$": (flight.cost_grid * flight.thrust).sum(),
         }
     )
+
 latex_tab = pd.DataFrame().from_dict(latex_tab).sort_values(by=["fid"])
 latex_tab["Fuel spent, kg"] = latex_tab["Fuel consumed, kg"].apply(lambda x: f"{x:.2f}")
-# latex_tab[r"$C_{grid}$"]=latex_tab[r"$C_{grid}$"].apply(lambda x: f"{x:.2f}")
+latex_tab[r"$C_{grid}$"] = latex_tab[r"$C_{grid}$"].apply(lambda x: f"{x:.3f}")
 if max_fuel:
-    latex_tab["Max fuel"] = latex_tab["Max fuel"].apply(lambda x: f"{x:.3f}")
+    latex_tab["Fuel constraint"] = latex_tab["Fuel constraint"].apply(
+        lambda x: f"{x:.2f}~\%"
+    )
+else:
+    latex_tab[r"$c_{dn}, 10^{-4}$"] = latex_tab[r"$c_{dn}, 10^{-4}$"].apply(
+        lambda x: f"{x*10:.3f}"
+    )
+
 latex_tab[r"$T \times C_{grid}$"] = (
     latex_tab[r"$T \times C_{grid}$"].astype(int).apply(lambda x: f"{x:,}")
 )
@@ -458,9 +466,9 @@ cbar = fig.colorbar(
 cbar.set_ticks(np.linspace(0, 5, 5))
 # cbar.set_ticks([0,5])
 # cbar.set_ticklabels(["Fuel optimal", "Population optimal"])
-cbar.set_ticklabels([0.0, 0.3, 1.5, 3.0, 9.0])
+cbar.set_ticklabels([0.00, 0.03, 0.15, 0.30, 0.90])
 # cbar.set_label(r"Fuel optimal   →   Population optimal")
-cbar.set_label(r"Cost-weighting factor $c_{dn}, × 10^{-4}$")
+cbar.set_label(r"Cost-weighting factor $c_{dn}, × 10^{-3}$")
 # ax.legend()
 
 
@@ -611,7 +619,12 @@ fig, ax = plt.subplots(
 ax.set_extent(plot_extent)
 ax.add_feature(BORDERS, linestyle="dotted", alpha=1)
 ax.add_feature(COASTLINE, linestyle="dotted", alpha=1)
-
+plot_extent = [
+    min(flights.longitude.values) - 0.3 - 0.15,
+    max(flights.longitude.values) + 0.3 + 0.15,
+    min(flights.latitude.values) - 0.3 - 0.15,
+    max(flights.latitude.values) + 0.3 + 0.15,
+]
 
 df_c = df_cost  # .assign(cost=lambda x: np.where(x.cost > 0.8, 0.8, x.cost)).assign(cost=lambda x: np.where(x.cost < 0.01, 0.01, x.cost))
 
@@ -621,7 +634,7 @@ contr = ax.contourf(
     df_cost.longitude.values.reshape(nx, ny, nz)[:, :, 0],
     df_cost.latitude.values.reshape(nx, ny, nz)[:, :, 0],
     df_cost.cost.values.reshape(nx, ny, nz)[:, :, 6],
-    levels=25,
+    levels=15,
     alpha=0.4,
     norm=norm,
     transform=trans,
@@ -695,7 +708,7 @@ cbar = fig.colorbar(
 )
 cbar.set_ticks(np.linspace(0, 5, 5))
 cbar.set_ticklabels(["0%", "0.1%", "0.5%", "1.1%", "2%"])
-cbar.set_label("Fuel allowence increment")
+cbar.set_label("Fuel allowance increment")
 # ax.legend()
 
 
@@ -830,7 +843,7 @@ for ax in [ax0, ax1, ax2]:
         fontsize=8,
         bbox=dict(facecolor="white"),
     )
-    ax.legend(fontsize=7)
+    ax.legend(fontsize=10)
     gl = ax.gridlines(draw_labels=False, color="gray", alpha=0.5, ls="--")
     gl.left_labels = True
     gl.xlocator = mticker.FixedLocator([4, 5, 6])
